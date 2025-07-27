@@ -1,0 +1,11 @@
+name: pty_server
+description: A minimal WebSocket PTY server in Dart.
+version: 0.1.0
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  shelf: ^1.4.1
+  shelf_web_socket: ^1.0.4 # Downgrading to allow modern process_run
+  process_run: ^0.14.1 # Using a modern version with proper PTY support
+  pty: ^0.1.1 # A dedicated library for PTYs. Much cleaner!
