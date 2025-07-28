@@ -1,0 +1,13 @@
+#!/bin/bash
+
+echo "build for ... linux amd64"
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/conduit-linux-x64 .;
+echo "build for ... linux arm64"
+GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o dist/conduit-linux-arm64 .;
+echo "build for ... darwin amd64"
+GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/conduit-macos-x64 .;
+echo "build for ... darwin arm64"
+GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/conduit-macos-arm64 .;
+echo "build for ... windows amd64"
+GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/conduit-windows-x64.exe .;
+echo "done."
