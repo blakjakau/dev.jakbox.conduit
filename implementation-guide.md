@@ -17,6 +17,13 @@ All API endpoints (/terminal, /files, /up) use the same authorization logic.
         -   **HTTP Header:** X-Conduit-Key: YOUR_API_KEY
         -   **Query Parameter (less secure for GET/WS):** key=YOUR_API_KEY (e.g., /files?path=.&key=YOUR_API_KEY)
 
+## CLI Configuration Flags
+-   `--install-user`: Installs Conduit for the current user. See Installation section.
+-   `--install-service`: Installs Conduit as a systemd service (Linux only, requires root).
+-   `--uninstall`: Removes user and/or system installations.
+-   `--no-idle-shutdown`: Disables the default 60-minute idle shutdown timer. This is automatically used when installing as a service.
+
+
 ## 1. Terminal API (/terminal)
 
 **Purpose:** Provides a full-duplex WebSocket connection to a pseudo-terminal (shell).
@@ -168,3 +175,61 @@ All responses include action, path, and optionally error or data.
 -   **HTTP REST:** Standard HTTP status codes (e.g., 401 Unauthorized, 403 Forbidden, 404 Not Found, 500 Internal Server Error) with descriptive plaintext or JSON bodies.
 -   **WebSocket:** Error messages are embedded in the error field of the fileResponse object.
 -   **Authorization Failures:** 401 Unauthorized for REST, WebSocket connection will fail during upgrade with appropriate logging server-side.
+
+## 4. Installation & Uninstallation APIs
+
+These APIs facilitate user-level and system-level installation of Conduit.
+
+**Security Note:** All installation/uninstallation HTTP endpoints are **strictly limited to requests originating from 127.0.0.1 (localhost)**, regardless of API key presence, for security reasons.
+
+### 4.1. Install User (CLI & HTTP)
+
+**Purpose:** Installs Conduit as a user-level application and registers its `conduit://` protocol handler. Does not require elevated permissions.
+
+**CLI Usage:**
+```bash
+./conduit --install-user
+```
+
+**HTTP Endpoint:**
+-   **Endpoint:** http://<host>:<port>/install-user (e.g., http://localhost:3022/install-user)
+-   **Method:** GET
+-   **Response (200 OK):** A plaintext message detailing the installation steps and outcome.
+-   **Error (403 Forbidden):** If not from localhost.
+-   **Error (500 Internal Server Error):** If installation fails (e.g., not a compiled build, OS not supported).
+
+### 4.2. Uninstall (CLI & HTTP)
+
+**Purpose:** Attempts to remove both user-level and (if applicable and run with root) system-level installations of Conduit.
+
+**CLI Usage:**
+```bash
+./conduit --uninstall
+```
+-   **Endpoint:** http://<host>:<port>/uninstall (e.g., http://localhost:3022/uninstall)
+-   **Method:** GET
+-   **Response (200 OK):** A plaintext message detailing the uninstallation steps and outcome.
+-   **Error (403 Forbidden):** If not from localhost.
+-   **Error (500 Internal Server Error):** If uninstallation encounters issues (e.g., OS not supported).
+
+### 4.3. Launching Installed Conduit from PWA
+
+Once Conduit is installed with its custom protocol handler (`conduit://`), you can launch it directly from your PWA using `window.open()`:
+
+```javascript
+window.open('conduit://', '_blank');
+// You can pass data via the URL, e.g., 'conduit://open-terminal?cwd=/path/to/project'
+```
+**Note:** The `_blank` target is often required by browsers for custom URL schemes to prevent navigation away from the current PWA context. The specific behavior (e.g., prompt for user permission) depends on the user's operating system and browser settings.
+
+## 5. Kill Switch API (/kill)
+
+**Purpose:** Forcefully shuts down the Conduit server process.
+
+**Security Note:** This endpoint is **strictly limited to requests originating from 127.0.0.1 (localhost)**. It is **disabled** if the server was started with the `--no-idle-shutdown` flag.
+
+-   **Endpoint:** http://<host>:<port>/kill (e.g., http://localhost:3022/kill)
+-   **Method:** GET
+-   **Response (200 OK):** A plaintext message confirming shutdown initiated.
+-   **Error (403 Forbidden):** If not from localhost.
+-   **Error (500 Internal Server Error):** Should not typically occur unless `os.Exit` itself has issues.

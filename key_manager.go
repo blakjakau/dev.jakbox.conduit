@@ -36,7 +36,7 @@ func manageAPIKey(forceGenerateAndPrint bool) {
 	content, err := ioutil.ReadFile(apiKeyPath)
 	if err == nil {
 		requiredAPIKey = strings.TrimSpace(string(content))
-		fmt.Printf("Existing API Key (from %s):\n%s\n", apiKeyPath, requiredAPIKey)
+		fmt.Printf("Existing API Key found (%s)\n", apiKeyPath)
 		if forceGenerateAndPrint {
 			// If we successfully read an existing key AND --key was passed,
 			// we're done; the key is now in `requiredAPIKey` and has been printed.
