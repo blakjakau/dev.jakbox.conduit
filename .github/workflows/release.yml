@@ -55,12 +55,13 @@ jobs:
       
       # For distribution, you would typically continue with notarization and creating a DMG/ZIP.
       # This is an example of creating a release asset.
-      - name: Package Release Assets
+      - name: Stage Release Assets
         run: |
-          zip release.zip conduit-macos-x64 conduit-macos-arm64
+          mkdir -p dist
+          mv conduit-macos-x64 conduit-macos-arm64 dist/
 
       # Create a GitHub Release and upload the assets
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release.zip
+          files: dist/*
