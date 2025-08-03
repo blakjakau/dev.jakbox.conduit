@@ -18,25 +18,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21' # Specify your Go version
-
-      # Import the signing certificate from a secret
-      - name: Import Signing Certificate
-        id: import_cert
-        uses: apple-actions/import-codesign-certs@v3
-        with:
-          p12-file-base64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          p12-password: ${{ secrets.MACOS_CERT_PASSWORD }}
-      # Verify that the signing identity was imported correctly
-      - name: Verify Signing Identity
-        run: |
-          echo "--- Available Signing Identities ---"
-          security find-identity -v -p codesigning
-          echo "--- Action Output ---"
-          echo "Signing Identity from action: ${{ steps.import_cert.outputs.signing-identity }}"
-          if [ -z "${{ steps.import_cert.outputs.signing-identity }}" ]; then
-            echo "::error::Signing identity not found. Check that your MACOS_CERT_P12_BASE64 and MACOS_CERT_PASSWORD secrets are correct and that the .p12 file contains a 'Developer ID Application' certificate."
-            exit 1
-          fi
       # Build for both architectures
       - name: Build macOS Binaries
         run: |
@@ -62,18 +43,11 @@ jobs:
           </plist>
           EOF
 
-      # Sign the binaries
-      - name: Sign Binaries
+      # Sign the binaries with an ad-hoc identity
+      - name: Ad-hoc Sign Binaries
         run: |
-          codesign --force --timestamp --options runtime \
-            --sign "${{ steps.import_cert.outputs.signing-identity }}" \
-            --entitlements entitlements.plist \
-            conduit-macos-x64
-
-          codesign --force --timestamp --options runtime \
-            --sign "${{ steps.import_cert.outputs.signing-identity }}" \
-            --entitlements entitlements.plist \
-            conduit-macos-arm64
+           codesign --force --sign - --entitlements entitlements.plist conduit-macos-x64
+          codesign --force --sign - --entitlements entitlements.plist conduit-macos-arm64
       
       # For distribution, you would typically continue with notarization and creating a DMG/ZIP.
       # This is an example of creating a release asset.
