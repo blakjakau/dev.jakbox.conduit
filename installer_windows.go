@@ -19,6 +19,25 @@ const (
 	targetExecName                = "conduit"
 )
 
+// checkIfInstalled checks if the executable is running from a known installation path.
+func checkIfInstalled() bool {
+	exePath, err := os.Executable()
+	if err != nil {
+		return false
+	}
+
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" {
+		return false
+	}
+
+	targetAppDir := filepath.Join(localAppData, userLocalAppDataSubDirWindows)
+	installedPath := filepath.Join(targetAppDir, targetExecName+".exe")
+
+	// Use EqualFold for case-insensitive path comparison on Windows.
+	return strings.EqualFold(exePath, installedPath)
+}
+
 // InstallService is a placeholder for Windows service installation.
 func InstallService() (string, error) {
 	return "Service installation is not supported on Windows yet.", fmt.Errorf("unsupported OS")

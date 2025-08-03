@@ -167,7 +167,8 @@ All responses include action, path, and optionally error or data.
   "status": "running",
   "version": "0.1.0",
   "uptime_seconds": 3600.123,
-  "active_connections": 5
+  "active_connections": 5,
+  "is_installed": true
 }
 
 ## Error Handling
