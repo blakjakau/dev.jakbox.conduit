@@ -26,7 +26,17 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           p12-password: ${{ secrets.MACOS_CERT_PASSWORD }}
-
+      # Verify that the signing identity was imported correctly
+      - name: Verify Signing Identity
+        run: |
+          echo "--- Available Signing Identities ---"
+          security find-identity -v -p codesigning
+          echo "--- Action Output ---"
+          echo "Signing Identity from action: ${{ steps.import_cert.outputs.signing-identity }}"
+          if [ -z "${{ steps.import_cert.outputs.signing-identity }}" ]; then
+            echo "::error::Signing identity not found. Check that your MACOS_CERT_P12_BASE64 and MACOS_CERT_PASSWORD secrets are correct and that the .p12 file contains a 'Developer ID Application' certificate."
+            exit 1
+          fi
       # Build for both architectures
       - name: Build macOS Binaries
         run: |
