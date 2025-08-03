@@ -18,6 +18,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21' # Specify your Go version
+          
       # Build for both architectures
       - name: Build macOS Binaries
         run: |
@@ -42,11 +43,11 @@ jobs:
           </dict>
           </plist>
           EOF
-
+          
       # Sign the binaries with an ad-hoc identity
       - name: Ad-hoc Sign Binaries
         run: |
-           codesign --force --sign - --entitlements entitlements.plist conduit-macos-x64
+          codesign --force --sign - --entitlements entitlements.plist conduit-macos-x64
           codesign --force --sign - --entitlements entitlements.plist conduit-macos-arm64
       
       # For distribution, you would typically continue with notarization and creating a DMG/ZIP.
