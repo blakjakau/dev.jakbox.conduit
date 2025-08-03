@@ -63,7 +63,7 @@ fi
 
 # Execute builds based on flags
 if [ $BUILD_LINUX -eq 1 ]; then build_for_linux; fi
-if [ $BUILD_MAC -eq 1 ]; then build_for_mac "$NO_RECOMPILE_FLAG"; fi
 if [ $BUILD_WIN -eq 1 ]; then build_for_windows; fi
+if [ $BUILD_MAC -eq 1 ]; then build_for_mac "$NO_RECOMPILE_FLAG"; fi
 
 echo "Build process complete."
