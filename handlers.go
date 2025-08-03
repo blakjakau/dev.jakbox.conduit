@@ -35,6 +35,7 @@ type statusResponse struct {
 	Version           string  `json:"version"`
 	UptimeSeconds     float64 `json:"uptime_seconds"`
 	ActiveConnections int32   `json:"active_connections"`
+	IsInstalled       bool    `json:"is_installed"`
 }
 
 // Gorilla WebSocket upgrader with origin check
@@ -244,6 +245,7 @@ func upcheckHandler(w http.ResponseWriter, r *http.Request) {
 		Version:           version,
 		UptimeSeconds:     uptime,
 		ActiveConnections: connections,
+		IsInstalled:       checkIfInstalled(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

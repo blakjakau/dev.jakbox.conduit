@@ -1,0 +1,158 @@
+#!/bin/bash
+
+# --- Configuration ---
+REMOTE_USER="jason"
+	# Your username on the Mac
+REMOTE_HOST="macbookpro.local"
+	# The IP address of your Mac
+REMOTE_BUILD_DIR="/Users/jason/gobuild" 
+	# A temporary directory on your Mac for building
+LOCAL_REPO_DIR="/home/jason/repo/dev.jakbox.conduit"
+	# The root directory of your project on your Linux machine
+LOCAL_DIST_DIR="$LOCAL_REPO_DIR/dist" # The directory on Linux where signed files will be placed
+
+# --- Mac-Specific Variables (Fill these in) ---
+# include the credentials for build and signing on the remote mac
+if [ ! -f "./.osx-build-credentials" ]; then
+    echo "Error: .osx-build-credentials file not found. Please create it with the following content:" >&2
+    echo '  export SIGNING_IDENTITY="[name of the singing identity on your mac]"' >&2
+    echo '  export TEAM_ID="[signing identity team id]"' >&2
+    echo '  export MAC_PASSWORD="[your account password on your mac, to unlock the keyfile]"' >&2
+    exit 1
+fi
+source ./.osx-build-credentials
+
+echo "Creds: $CREDS"
+# --- Script Logic ---
+
+RECOMPILE=1
+if [ "$1" == "--no-recompile" ]; then
+  RECOMPILE=0
+  echo "--- 'no-recompile' flag detected. Skipping sync and build steps. ---"
+fi
+
+
+echo "--- Starting remote signing process ---"
+
+# 1. Create remote build directory if it doesn't exist
+ssh "$REMOTE_USER@$REMOTE_HOST" "mkdir -p \"$REMOTE_BUILD_DIR\""
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to create remote build directory. Check SSH connection and path."
+  exit 1
+fi
+echo "Remote build directory prepared."
+
+# 2. Sync source code if recompiling
+if [ $RECOMPILE -eq 1 ]; then
+  echo "--- Syncing project source code to the Mac ---"
+  rsync -rlvz --no-perms --delete \
+    --exclude '.git' \
+    --exclude 'dist' \
+    --exclude 'stage' \
+    "$LOCAL_REPO_DIR/" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_BUILD_DIR/"
+  if [ $? -ne 0 ]; then
+    echo "Error: Failed to sync project files to the Mac."
+    exit 1
+  fi
+  echo "Project source code synced."
+else
+  echo "--- Skipping source code sync. ---"
+fi
+
+# 3. Execute build and signing commands on the Mac
+echo "--- Building and signing on the remote Mac ---"
+ssh "$REMOTE_USER@$REMOTE_HOST" << EOF
+  set -e # Exit immediately if a command exits with a non-zero status.
+
+  echo "Changing directory to: $REMOTE_BUILD_DIR"
+  cd "$REMOTE_BUILD_DIR"
+
+  if [ $RECOMPILE -eq 1 ]; then
+    # Ensure Go is in the PATH for non-interactive SSH sessions
+    export PATH=\$PATH:/usr/local/go/bin:/opt/homebrew/bin
+
+    echo "Cleaning Go build cache to prevent stale objects..."
+    go clean -cache
+
+    # --- Prepare build environment for CGO ---
+    echo "Setting up CGO build environment..."
+    export CGO_ENABLED=1
+    export SDKROOT=\$(xcrun --sdk macosx --show-sdk-path)
+
+    # --- Build the macOS binaries natively ---
+    echo "Building for macOS amd64..."
+    GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o conduit-macos-x64 .
+    echo "Building for macOS arm64..."
+    GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o conduit-macos-arm64 .
+    echo "Native builds complete."
+  else
+    echo "--- Skipping Go build steps on remote. ---"
+  fi
+
+  # --- Prepare for signing ---
+  echo "Unlocking keychain..."
+  # This is necessary for non-interactive SSH sessions.
+  security unlock-keychain -p "$MAC_PASSWORD"
+
+  ENTITLEMENTS_FILE="entitlements.plist"
+  echo "Creating entitlements file: \$ENTITLEMENTS_FILE"
+  cat << EOPLIST > "\$ENTITLEMENTS_FILE"
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+        <key>com.apple.security.get-task-allow</key>
+        <true/>
+    </dict>
+    </plist>
+EOPLIST
+
+  # --- Sign the newly built binaries ---
+  binaries_to_sign=("conduit-macos-x64" "conduit-macos-arm64")
+
+  for binary in "\${binaries_to_sign[@]}"; do
+    if [ -f "\$binary" ]; then
+      echo "--- Signing \$binary ---"
+      security unlock-keychain -p "$MAC_PASSWORD" login.keychain
+
+      codesign --force --timestamp --options runtime --sign "$SIGNING_IDENTITY" --entitlements "\$ENTITLEMENTS_FILE" "\$binary"
+      if [ \$? -ne 0 ]; then
+          echo "ERROR: Failed to sign \$binary"
+          exit 1
+      fi
+      echo "Successfully signed \$binary"
+    else
+      echo "WARNING: Binary \$binary not found, skipping."
+    fi
+  done
+
+  echo "All binaries signed successfully."
+
+EOF
+
+if [ $? -ne 0 ]; then
+  echo "Error: Remote build and signing commands failed."
+  exit 1
+fi
+echo "Remote build and signing complete."
+
+# 4. Create local dist directory if it doesn't exist
+mkdir -p "$LOCAL_DIST_DIR"
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to create local dist directory."
+  exit 1
+fi
+echo "Local dist directory prepared."
+
+# 5. Transfer the signed file(s) back
+echo "--- Transferring signed binaries back to dist/ ---"
+scp "$REMOTE_USER@$REMOTE_HOST:$REMOTE_BUILD_DIR/conduit-macos-x64" "$LOCAL_DIST_DIR/"
+scp "$REMOTE_USER@$REMOTE_HOST:$REMOTE_BUILD_DIR/conduit-macos-arm64" "$LOCAL_DIST_DIR/"
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to download one or more signed binaries."
+  exit 1
+fi
+echo "Signed binaries transferred to $LOCAL_DIST_DIR/"
+
+echo "--- Remote signing process finished successfully! ---"
+

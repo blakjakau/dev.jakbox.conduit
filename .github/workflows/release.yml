@@ -1,0 +1,78 @@
+# .github/workflows/release.yml
+name: Build and Release macOS App
+
+on:
+  push:
+    tags:
+      - 'v*.*.*' # Trigger on version tags like v1.0.0
+
+jobs:
+  build-and-sign-macos:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21' # Specify your Go version
+
+      # Import the signing certificate from a secret
+      - name: Import Signing Certificate
+        id: import_cert
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_CERT_PASSWORD }}
+
+      # Build for both architectures
+      - name: Build macOS Binaries
+        run: |
+          export CGO_ENABLED=1
+          export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o conduit-macos-x64 .
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o conduit-macos-arm64 .
+          echo "Builds complete."
+
+      # Create the entitlements file for signing
+      - name: Create Entitlements
+        run: |
+          cat <<EOF > entitlements.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <!-- Add required entitlements here. For basic apps, this is often empty. -->
+            <!-- The get-task-allow entitlement is for debugging and should be false or removed for releases -->
+            <key>com.apple.security.get-task-allow</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+      # Sign the binaries
+      - name: Sign Binaries
+        run: |
+          codesign --force --timestamp --options runtime \
+            --sign "${{ steps.import_cert.outputs.signing-identity }}" \
+            --entitlements entitlements.plist \
+            conduit-macos-x64
+
+          codesign --force --timestamp --options runtime \
+            --sign "${{ steps.import_cert.outputs.signing-identity }}" \
+            --entitlements entitlements.plist \
+            conduit-macos-arm64
+      
+      # For distribution, you would typically continue with notarization and creating a DMG/ZIP.
+      # This is an example of creating a release asset.
+      - name: Package Release Assets
+        run: |
+          zip release.zip conduit-macos-x64 conduit-macos-arm64
+
+      # Create a GitHub Release and upload the assets
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release.zip
