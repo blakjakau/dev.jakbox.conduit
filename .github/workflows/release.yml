@@ -70,13 +70,11 @@ jobs:
           $pfx_cert_b64 = "${{ env.WINDOWS_CERT_PFX_BASE64 }}"
           $pfx_path = Join-Path -Path $env:RUNNER_TEMP -ChildPath "cert.pfx"
           [System.IO.File]::WriteAllBytes($pfx_path, [System.Convert]::FromBase64String($pfx_cert_b64))
-          
-          # Find signtool.exe from the Windows SDK
-          $signtool = & "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
-          if (-not $signtool) { Write-Error "signtool.exe not found."; exit 1 }
-          
+          # Find the latest signtool.exe from the Windows SDK and store its path
+          $signtoolPath = (Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object -Property VersionInfo -Descending | Select-Object -First 1).FullName
+          if (-not $signtoolPath) { Write-Error "signtool.exe not found in Windows Kits 10 bin."; exit 1 }
           # Sign the file with a timestamp server
-          & $signtool sign /f $pfx_path /p "${{ env.WINDOWS_CERT_PASSWORD }}" /tr http://timestamp.digicert.com /td sha256 /fd sha256 "${{ matrix.asset-name }}"
+          & $signtoolPath sign /f $pfx_path /p "${{ env.WINDOWS_CERT_PASSWORD }}" /tr http://timestamp.digicert.com /td sha256 /fd sha256 "${{ matrix.asset-name }}"
         shell: pwsh
 
       # --- Upload Artifact ---
