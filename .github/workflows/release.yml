@@ -21,6 +21,12 @@ jobs:
           - os: windows-latest
             arch: amd64
             asset-name: conduit-windows-x64.exe
+          - os: ubuntu-latest
+            arch: amd64
+            asset-name: conduit-linux-x64
+          - os: ubuntu-latest
+            arch: arm64
+            asset-name: conduit-linux-arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -54,6 +60,11 @@ jobs:
           </plist>
           EOF
           codesign --force --sign - --entitlements entitlements.plist ${{ matrix.asset-name }}
+
+      # --- Linux Build ---
+      - name: Build Linux Binary
+        if: runner.os == 'Linux'
+        run: go build -ldflags="-s -w" -o ${{ matrix.asset-name }} .
 
       # --- Windows Build and Sign ---
       - name: Build Windows Binary
