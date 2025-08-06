@@ -5,34 +5,36 @@ package main
 import (
 	"io"
 	"os/exec"
-	"log" // Add this import for logging
+	"log"
 	"strings"
-
-	"github.com/creack/pty" // Use the same library as Unix
+	"github.com/UserExistsError/conpty"
 )
 
 // startPty returns an io.ReadWriteCloser and the *exec.Cmd for the PTY process.
 // On modern Windows, this automatically uses the native ConPTY API.
-func startPty(shell string, homeDir string) (io.ReadWriteCloser, *exec.Cmd, error) {
-	c := exec.Command(shell)
-	c.Dir = homeDir
-	c.Env = append(c.Env, "TERM=xterm-256color")
-
-	// The `pty.Start` function on Windows will automatically use ConPTY if it is available.
-	ptmx, err := pty.Start(c)
+func startPty(shell string, homeDir string) (io.ReadWriteCloser, *exec.Cmd, func(cols, rows int), error) {
+	// We create a placeholder exec.Cmd. The conpty library starts the process,
+	// but does not expose the underlying *os.Process object.
+	// Therefore, ptyCmd.Process will be nil. This is handled in handlers.go.
+	ptyCmd := exec.Command(shell)
+	p, err := conpty.Start(shell)
 	if err != nil {
-		log.Printf("DEBUG: pty.Start failed with error: %v (Type: %T)", err, err) // Log the specific error
-		return nil, nil, err
+		log.Printf("ERROR: Failed to create ConPTY: %v", err)
+		return nil, nil, nil, err
+	}
+	// The ReadWriteCloser interface is provided by the *Pty object itself.
+	// Closing this ptmx object will correctly kill the underlying process.
+	ptmx := io.ReadWriteCloser(p)
+	resizeFunc := func(cols, rows int) {
+		p.Resize(cols, rows) // Call the Resize method of the *Pty object
 	}
 
 	// Workaround for starting in the correct directory.
-	// After the shell starts, we send a `cd` command to it.
 	if strings.HasSuffix(strings.ToLower(shell), "powershell.exe") {
-		// For PowerShell, we use Set-Location. Add a newline to execute it.
 		ptmx.Write([]byte("Set-Location -Path '" + homeDir + "'\r\n"))
 	} else { // Assume cmd.exe
 		ptmx.Write([]byte("cd /d \"" + homeDir + "\"\r\n"))
 	}
 
-	return ptmx, c, nil
+	return ptmx, ptyCmd, resizeFunc, nil
 }

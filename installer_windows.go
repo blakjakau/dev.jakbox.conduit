@@ -44,38 +44,61 @@ func InstallService() (string, error) {
 	return "Service installation is not supported on Windows yet.", fmt.Errorf("unsupported OS")
 }
 
-// Uninstall is a placeholder for Windows uninstallation.
+// Uninstall handles the uninstallation process on Windows.
 func Uninstall() (string, error) {
 	var messages strings.Builder
 	messages.WriteString("Starting Windows uninstallation...\n")
 
-	// 1. Remove files
+	// 1. Remove registry keys first, as this doesn't involve file locks.
+	cmdReg := exec.Command("reg", "delete", `HKCU\Software\Classes\conduit`, "/f")
+	regOut, errReg := cmdReg.CombinedOutput()
+	// We check the output because `reg delete` returns an error if the key doesn't exist.
+	// We only care about actual errors, not "key not found" messages.
+	if errReg != nil && !strings.Contains(string(regOut), "cannot find") {
+		messages.WriteString(fmt.Sprintf("! Warning during registry key deletion: %v\n", errReg))
+	} else {
+		messages.WriteString("- Removed registry entries for conduit:// protocol.\n")
+	}
+
+	// 2. Schedule self-deletion of files via a temporary batch script.
+	// This is necessary because the running executable cannot delete itself.
 	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData != "" {
-		targetAppDir := filepath.Join(localAppData, userLocalAppDataSubDirWindows)
-		if _, err := os.Stat(targetAppDir); err == nil {
-			if err := os.RemoveAll(targetAppDir); err != nil {
-				messages.WriteString(fmt.Sprintf("! Error removing directory %s: %v\n", targetAppDir, err))
-			} else {
-				messages.WriteString(fmt.Sprintf("- Removed application directory: %s\n", targetAppDir))
-			}
-		}
+	if localAppData == "" {
+		msg := "! Error: LOCALAPPDATA environment variable not set. Cannot perform file uninstallation."
+		messages.WriteString(msg)
+		return messages.String(), fmt.Errorf("LOCALAPPDATA not set")
+	}
+	targetAppDir := filepath.Join(localAppData, userLocalAppDataSubDirWindows)
+
+	// Create a temporary batch file to perform the deletion after we exit.
+	batchFilePath := filepath.Join(os.TempDir(), "conduit_uninstall.bat")
+	// The batch script waits 2 seconds, removes the application directory, and then deletes itself.
+	batchContent := fmt.Sprintf(
+		"@echo off\r\n"+
+			"timeout /t 2 /nobreak > nul\r\n"+
+			"rd /s /q \"%s\"\r\n"+
+			"del \"%s\"\r\n",
+		targetAppDir, batchFilePath,
+	)
+
+	if err := os.WriteFile(batchFilePath, []byte(batchContent), 0755); err != nil {
+		msg := fmt.Sprintf("! Error creating uninstall script: %v", err)
+		messages.WriteString(msg)
+		return messages.String(), err
 	}
 
-	// 2. Remove registry keys using reg.exe for robust deletion.
-	// The /f flag forces deletion without prompt.
-	cmd := exec.Command("reg", "delete", `HKCU\Software\Classes\conduit`, "/f")
-	cmd.Stdout = &messages // Capture output for messages
-	cmd.Stderr = &messages // Capture errors for messages
-	err := cmd.Run()
-
-	if err != nil {
-		messages.WriteString(fmt.Sprintf("! Error deleting registry key HKEY_CURRENT_USER\\Software\\Classes\\conduit: %v\n", err))
-		return messages.String(), fmt.Errorf("registry deletion failed: %w", err)
+	// Execute the batch script in a new, detached process.
+	cmd := exec.Command("cmd.exe", "/C", "start", "/b", batchFilePath)
+	if err := cmd.Start(); err != nil {
+		msg := fmt.Sprintf("! Error starting uninstall script: %v", err)
+		messages.WriteString(msg)
+		return messages.String(), err
 	}
-	messages.WriteString("- Removed registry entries for conduit:// protocol.\n")
 
-	messages.WriteString("\nWindows uninstallation complete.\n")
+	messages.WriteString(fmt.Sprintf("- Scheduled removal of application directory: %s\n", targetAppDir))
+	messages.WriteString("\nWindows uninstallation process has been initiated.\n")
+	messages.WriteString("The application will now exit. Files will be removed in the background shortly.\n")
+
 	return messages.String(), nil
 }
 
