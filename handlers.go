@@ -233,6 +233,15 @@ func terminalServer(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[%s] Client #%d (PID: %d) connected (active: %d)", timestamp, sessionID, pid, activeConnections)
 	defer log.Printf("[%s] Client #%d (PID: %d) disconnected (active: %d)", time.Now().UTC().Format(time.RFC3339), sessionID, pid, activeConnections)
+	// Start a goroutine to wait for the PTY process to exit. When it exits,
+	// we close the WebSocket connection. This is crucial for reliably
+	// handling the "exit" command from within the shell, especially on Windows.
+	if ptyCmd.Process != nil {
+		go func() {
+			ptyCmd.Process.Wait()
+			ws.Close()
+		}()
+	}	
 	go writePump(ws, ptmx, sessionID)
 	readPump(ws, ptmx, ptyCmd, sessionID)
 }
