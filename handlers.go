@@ -3,14 +3,13 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
-
-	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
 
@@ -110,7 +109,7 @@ func checkRequestAuthorization(r *http.Request) bool {
 }
 
 // writePump pumps messages from the PTY to the websocket connection.
-func writePump(ws *websocket.Conn, ptmx *os.File, sessionID int32) {
+func writePump(ws *websocket.Conn, ptmx io.ReadCloser, sessionID int32) {
 	defer ws.Close()
 	buffer := make([]byte, 4096)
 	for {
@@ -133,10 +132,16 @@ func writePump(ws *websocket.Conn, ptmx *os.File, sessionID int32) {
 }
 
 // readPump pumps messages from the websocket connection to the PTY.
-func readPump(ws *websocket.Conn, ptmx *os.File, ptyCmd *exec.Cmd, sessionID int32) {
+func readPump(ws *websocket.Conn, ptmx io.Writer, ptyCmd *exec.Cmd, sessionID int32) {
+
 	defer func() {
 		ws.Close()
-		ptyCmd.Process.Kill()
+		// On Windows, ptyCmd.Process can be nil because the conpty library
+		// doesn't expose it. The ptmx.Close() call in the calling function
+		// (terminalServer) handles killing the process correctly on all platforms.
+		if ptyCmd.Process != nil {
+			ptyCmd.Process.Kill()
+		}
 	}()
 
 	for {
@@ -152,7 +157,11 @@ func readPump(ws *websocket.Conn, ptmx *os.File, ptyCmd *exec.Cmd, sessionID int
 		}
 		switch msg.Type {
 		case "resize":
-			pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(msg.Rows), Cols: uint16(msg.Cols)})
+			// TODO: Resizing is now platform-specific. A new cross-platform
+			// interface is needed to handle this properly.
+			if resizePty != nil {
+				resizePty(msg.Cols, msg.Rows)
+			}
 		case "data":
 			ptmx.Write([]byte(msg.Content))
 		}
@@ -181,28 +190,17 @@ func terminalServer(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv("OS") == "Windows_NT" {
 		shell = "powershell.exe"
 	}
-	c := exec.Command(shell)
 
 	// Set the working directory for the shell to the user's home directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Printf("ERROR: Could not get user home directory: %v, using current directory.", err)
-	} else {
-		c.Dir = homeDir
+		homeDir = "." // Fallback to current dir if home is not found
 	}
-	c.Env = append(os.Environ(), "TERM=xterm-256color")
-	// Append initial environment variables
-	c.Env = append(os.Environ(), "TERM=xterm-256color")
-	// For Bash/Zsh: set PROMPT_COMMAND to emit OSC 9;9 sequence for CWD
-	// This allows the frontend to detect directory changes.
-	// \x1b]9;9;PATH\x1b\\ is an unofficial escape sequence often used for this.
-	if shell == "bash" || shell == "zsh" {
-		c.Env = append(c.Env, `PROMPT_COMMAND=printf "\033]9;9;%s\033\\" "${PWD}"`)
-	} else if shell == "cmd.exe" || shell == "powershell.exe" {
-		// Windows shells don't have PROMPT_COMMAND equivalent in the same way.
-		// Handling CWD updates for Windows would require more complex methods (e.g., polling or hooking).
-	}
-	ptmx, err := pty.Start(c)
+	// Use our new platform-agnostic function to start the PTY.
+	// This call now handles all OS-specific logic and command creation. It also returns a resize function.
+	var resizeFunc func(cols, rows int)
+	ptmx, ptyCmd, resizeFunc, err := startPty(shell, homeDir)
 	if err != nil {
 		log.Printf("ERROR: Failed to start PTY for session #%d: %v", sessionID, err)
 		return
@@ -219,7 +217,7 @@ func terminalServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The initial working directory of the PTY process (which was set to homeDir)
-	initialCwd := c.Dir
+	initialCwd := homeDir
 
 	// Send initial terminal info to the client
 	infoMsg := wsMessage{
@@ -228,11 +226,24 @@ func terminalServer(w http.ResponseWriter, r *http.Request) {
 		Cwd:     initialCwd,
 	}
 	ws.WriteJSON(infoMsg) // Ignore error, best effort to send initial info
-	log.Printf("[%s] Client #%d (PID: %d) connected (active: %d)", timestamp, sessionID, c.Process.Pid, activeConnections)
-	defer log.Printf("[%s] Client #%d (PID: %d) disconnected (active: %d)", time.Now().UTC().Format(time.RFC3339), sessionID, c.Process.Pid, activeConnections)
-
+	resizePty = resizeFunc // Assign the resize function for this session
+	pid := -1 // Default to -1 if process info is not available (e.g., on Windows)
+	if ptyCmd.Process != nil {
+		pid = ptyCmd.Process.Pid
+	}
+	log.Printf("[%s] Client #%d (PID: %d) connected (active: %d)", timestamp, sessionID, pid, activeConnections)
+	defer log.Printf("[%s] Client #%d (PID: %d) disconnected (active: %d)", time.Now().UTC().Format(time.RFC3339), sessionID, pid, activeConnections)
+	// Start a goroutine to wait for the PTY process to exit. When it exits,
+	// we close the WebSocket connection. This is crucial for reliably
+	// handling the "exit" command from within the shell, especially on Windows.
+	if ptyCmd.Process != nil {
+		go func() {
+			ptyCmd.Process.Wait()
+			ws.Close()
+		}()
+	}	
 	go writePump(ws, ptmx, sessionID)
-	readPump(ws, ptmx, c, sessionID)
+	readPump(ws, ptmx, ptyCmd, sessionID)
 }
 
 // upcheckHandler provides a simple health check endpoint.
@@ -251,3 +262,6 @@ func upcheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
+
+// resizePty stores the current session's PTY resize function.
+var resizePty func(cols, rows int)

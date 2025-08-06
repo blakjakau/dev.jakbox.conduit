@@ -20,7 +20,8 @@ build_for_mac() {
 
 build_for_windows() {
   echo "build for ... windows amd64"
-  GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/conduit-windows-x64.exe .;
+  # The "-H windowsgui" flag builds the executable as a GUI application, preventing the console window from appearing.
+  GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -ldflags="-s -w -H windowsgui" -o dist/conduit-windows-x64.exe .;
 }
 
 # Initialize flags
