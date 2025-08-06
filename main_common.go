@@ -95,7 +95,10 @@ func runConduitServer() {
 const version = "0.1.1"
 const port = "3022"
 var allowedOrigins = map[string]bool{
+	"https://cadence.jakbox.dev": true,
+	"https://cadence.jakbox.net": true,
 	"https://code.jakbox.dev": true,
+	"https://code.jakbox.net": true,
 	"http://localhost:8083":  true,
 	"http://localhost":       true,
 }
