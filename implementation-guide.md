@@ -1,6 +1,6 @@
-# Conduit API: Implementation Guide for AI
+# Conduit API: Implementation Guide
 
-This document details the Conduit API, designed for clear, direct implementation by an AI. All communication is via standard HTTP/WebSocket, with JSON for structured data.
+This document details the Conduit API, designed for clear, direct implementation. All communication is via standard HTTP/WebSocket, with JSON for structured data.
 
 ## Authentication & Authorization
 
