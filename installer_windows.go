@@ -175,7 +175,10 @@ func InstallUser() (string, error) {
 	}
 	defer commandKey.Close()
 
-	commandValue := fmt.Sprintf(`"%s" "%%1"`, targetExecPath)
+	// To run without a window, we must invoke PowerShell's 'Start-Process' cmdlet.
+	// The registry executes this via cmd.exe, so we explicitly launch powershell.exe.
+	// The -Command argument tells PowerShell to run our command and then exit.
+	commandValue := fmt.Sprintf(`powershell.exe -Command "Start-Process -WindowStyle Hidden -FilePath '%s' -ArgumentList '%%1'"`, targetExecPath)
 	if err := commandKey.SetStringValue("", commandValue); err != nil {
 		return fmt.Sprintf("Failed to set command value for conduit protocol: %v", err), err
 	}
