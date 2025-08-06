@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os/exec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,7 +46,37 @@ func InstallService() (string, error) {
 
 // Uninstall is a placeholder for Windows uninstallation.
 func Uninstall() (string, error) {
-	return "Uninstall is not supported on Windows yet.", fmt.Errorf("unsupported OS")
+	var messages strings.Builder
+	messages.WriteString("Starting Windows uninstallation...\n")
+
+	// 1. Remove files
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData != "" {
+		targetAppDir := filepath.Join(localAppData, userLocalAppDataSubDirWindows)
+		if _, err := os.Stat(targetAppDir); err == nil {
+			if err := os.RemoveAll(targetAppDir); err != nil {
+				messages.WriteString(fmt.Sprintf("! Error removing directory %s: %v\n", targetAppDir, err))
+			} else {
+				messages.WriteString(fmt.Sprintf("- Removed application directory: %s\n", targetAppDir))
+			}
+		}
+	}
+
+	// 2. Remove registry keys using reg.exe for robust deletion.
+	// The /f flag forces deletion without prompt.
+	cmd := exec.Command("reg", "delete", `HKCU\Software\Classes\conduit`, "/f")
+	cmd.Stdout = &messages // Capture output for messages
+	cmd.Stderr = &messages // Capture errors for messages
+	err := cmd.Run()
+
+	if err != nil {
+		messages.WriteString(fmt.Sprintf("! Error deleting registry key HKEY_CURRENT_USER\\Software\\Classes\\conduit: %v\n", err))
+		return messages.String(), fmt.Errorf("registry deletion failed: %w", err)
+	}
+	messages.WriteString("- Removed registry entries for conduit:// protocol.\n")
+
+	messages.WriteString("\nWindows uninstallation complete.\n")
+	return messages.String(), nil
 }
 
 // copyFile copies a file from src to dst.
